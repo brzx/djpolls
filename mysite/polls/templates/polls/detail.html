@@ -10,3 +10,5 @@
 {% endfor %}
 <input type="submit" value="Vote">
 </form>
+
+{% url 'polls:vote' question.id %}
