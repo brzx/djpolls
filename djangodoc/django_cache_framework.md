@@ -98,11 +98,161 @@ Memcached的一个出色功能是它能够在多个服务器上共享缓存。 �
         }
     }
 
-关于Memcached的最后一点是基于内存的缓存有一个缺点：因为缓存的数据存储在内存中，如果服务器崩溃，数据将会丢失。
-显然，内存不适用于永久数据存储，因此不要依赖基于内存的缓存作为唯一的数据存储。
-毫无疑问，没有任何Django缓存后端应该用于永久存储 - 它们都是用于缓存而不是存储的解决方案 - 但我们在此指出这一点，因为基于内存的缓存特别是暂时的。
+关于Memcached的一个关键问题是， 基于内存的缓存有一个缺点： 因为缓存的数据存储在内存中， 如果服务器崩溃了， 数据将会丢失。 显然， 内存不适用于永久数据存储， 因此不要依赖基于内存的缓存作为唯一的数据存储。 毫无疑问， 没有任何关于Django缓存的后端应该用于永久存储 - 它们都是用于缓存数据而不是存储的解决方案 - 但我们在此指出这一点， 是因为基于内存的缓存是暂时的。
 
 -------------
 
 #### Database caching
+
+Django可以将其缓存的数据存储在数据库中。 如果你有一个快速， 索引良好的数据库服务器， 这种方法效果最好。
+
+将数据库表用作缓存后端：
+
+- 将 BACKEND 设置为 django.core.cache.backends.db.DatabaseCache
+
+- 将 LOCATION 设置为 tablename， 即数据库表的名称。 此名称可以是您想要的任何名称， 只要它是一个尚未在您的数据库中使用的有效表名。
+
+在下面的示例中， 缓存表的名称为my_cache_table：
+
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'my_cache_table',
+        }
+    }
+
+##### Creating the cache table
+
+在使用数据库缓存之前， 必须使用以下命令创建缓存表：
+
+    python manage.py createcachetable
+
+这会在数据库中创建一个表， 该表的格式与Django的数据库缓存系统所期望的格式相同。 该表的名称取自 LOCATION。
+
+如果您在使用多个数据库缓存， createcachetable 会为每个缓存创建一个表。
+
+如果您在使用多个数据库， createcachetable 将遵循数据库路由器的 allow_migrate（） 方法（请参见下文）。
+
+与 migrate 一样， createcachetable 也不会触及现有表。 它只会创建缺少的表。
+
+想要打印要运行的SQL， 而不是执行它， 请使用 createcachetable --dry-run 选项。
+
+-------------
+
+##### Multiple databases
+
+如果对多个数据库使用数据库缓存，则还需要为数据库缓存表设置路由指令。
+出于路由的目的，数据库缓存表在名为django_cache的应用程序中显示为名为CacheEntry的模型。
+此模型不会出现在模型缓存中，但模型详细信息可用于路由目的。
+例如，以下路由器将所有缓存读取操作定向到cache_replica，并将所有写入操作定向到cache_primary。
+缓存表只会同步到cache_primary：
+
+    class CacheRouter:
+        """A router to control all database cache operations"""
+    
+        def db_for_read(self, model, **hints):
+            "All cache read operations go to the replica"
+            if model._meta.app_label == 'django_cache':
+                return 'cache_replica'
+            return None
+    
+        def db_for_write(self, model, **hints):
+            "All cache write operations go to primary"
+            if model._meta.app_label == 'django_cache':
+                return 'cache_primary'
+            return None
+    
+        def allow_migrate(self, db, app_label, model_name=None, **hints):
+            "Only install the cache model on primary"
+            if app_label == 'django_cache':
+                return db == 'cache_primary'
+            return None
+
+如果未指定数据库缓存模型的路由方向，则缓存后端将使用默认数据库。
+当然，如果不使用数据库缓存后端，则无需担心为数据库缓存模型提供路由指令。
+
+-------------
+
+##### Filesystem caching
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
