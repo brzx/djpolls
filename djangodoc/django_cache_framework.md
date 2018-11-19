@@ -1,4 +1,4 @@
-## Django 的缓存框架
+## Django 的缓存框架 [Django’s cache framework](https://docs.djangoproject.com/en/2.1/topics/cache/)
 > 翻译官: Brian Zhu
 
 动态网站的基本权衡是， 它们是动态的。 每次用户请求一个页面时， Web服务器都会进行各种计算 - 从数据库查询到模板呈现再到业务逻辑 - 以创建站点访问者看到的页面。 从处理开销的角度来看， 这比标准的文件读取文件系统服务器安排要昂贵得多。
@@ -473,7 +473,7 @@ key_prefix 和 cache 参数可以一起指定。 将连接 key_prefix 参数和 
 
 -------------
 
-##### The low-level cache API
+#### The low-level cache API
 
 
 
