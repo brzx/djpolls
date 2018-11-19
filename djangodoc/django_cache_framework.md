@@ -398,6 +398,83 @@ key_prefix 和 cache 参数可以一起指定。 将连接 key_prefix 参数和 
 
 ##### Specifying per-view cache in the URLconf
 
+上一节中的示例硬编码了视图被缓存的事实， 因为 cache_page 改变了 my_view 函数。 这种方法将您的视图耦合到缓存系统， 由于多种原因， 这种方法并不理想。 例如， 您可能希望在另一个无缓存站点上重用此视图函数， 或者您可能希望将视图分发给可能希望在不缓存的情况下使用它们的人员。 这些问题的解决方案是在 URLconf 中指定每个视图的缓存， 而不是用视图函数旁边的装饰器。
+
+这样做很简单： 只需在 URLconf 中引用视图函数和 cache_page 即可。 这是以前的旧URLconf：
+
+    urlpatterns = [
+        path('foo/<int:code>/', my_view),
+    ]
+
+下面是一样的， my_view 包含在 cache_page 中：
+
+    from django.views.decorators.cache import cache_page
+    
+    urlpatterns = [
+        path('foo/<int:code>/', cache_page(60 * 15)(my_view)),
+    ]
+
+-------------
+
+##### Template fragment caching
+
+如果您需要更多控制， 还可以使用缓存模板标记来缓存模板片段。 要让您的模板能够访问此标记， 请将 {% load cache %} 放在模板顶部附近。
+
+(% cache %} 模板标记在给定的时间内缓存块的内容。 它至少需要两个参数： 缓存超时时间（以秒为单位）和提供缓存片段的名称。 如果timeout为 None， 则片段将永久缓存。 名称将按原样使用， 不要使用变量。 例如：
+
+    {% load cache %}
+    {% cache 500 sidebar %}
+        .. sidebar ..
+    {% endcache %}
+
+> 在Django 2.0中更改：
+> 旧版本不允许超时设置为 None。
+
+有时， 您可能希望根据片段内显示的某些动态数据缓存片段的多个副本。 例如， 对于站点的每个用户， 您可能需要上一个示例中使用的侧栏的单独缓存副本。 通过将一个或多个其他参数（可能是带或不带过滤器的变量）传递给 {% cache %} 模板标记来唯一标识缓存片段来执行此操作：
+
+    {% load cache %}
+    {% cache 500 sidebar request.user.username %}
+        .. sidebar for logged in user ..
+    {% endcache %}
+
+如果 USE_I18N 设置为 True， 则每站点中间件缓存将遵循活动语言 [respect the active language](https://docs.djangoproject.com/en/2.1/topics/cache/#i18n-cache-key) 。 对于缓存模板标记， 您可以使用模板中可用的特定于转换的变量 [translation-specific variables](https://docs.djangoproject.com/en/2.1/topics/i18n/translation/#template-translation-vars) 之一来实现相同的结果：
+
+    {% load i18n %}
+    {% load cache %}
+    
+    {% get_current_language as LANGUAGE_CODE %}
+    
+    {% cache 600 welcome LANGUAGE_CODE %}
+        {% trans "Welcome to example.com" %}
+    {% endcache %}
+
+缓存超时时间可以是模板变量， 只要模板变量解析为整数值即可。 例如， 如果模板变量 my_timeout 设置为值600， 则以下两个示例是等效的：、
+
+    {% cache 600 sidebar %} ... {% endcache %}
+    {% cache my_timeout sidebar %} ... {% endcache %}
+
+此功能有助于避免模板中的重复。 您可以在一个位置设置变量中的超时时间， 然后只重用该值。
+
+默认情况下， 缓存标记将尝试使用名为 “template_fragments” 的缓存。 如果不存在此类缓存， 则它将回退到使用默认缓存。 您可以选择备用缓存后端以与 using 关键字参数一起使用， 该参数必须是标记的最后一个参数。
+
+    {% cache 300 local-thing ...  using="localcache" %}
+
+指定未配置的缓存名称被视为错误。
+
+**django.core.cache.utils.make_template_fragment_key(fragment_name, vary_on=None)**
+
+如果要获取用于缓存片段的缓存密钥， 可以使用 make_template_fragment_key.fragment_name 与缓存模板标记的第二个参数相同; vary_on 是传递给标记的所有其他参数的列表。 此函数可用于使缓存项无效或被覆盖， 例如：
+
+    >>> from django.core.cache import cache
+    >>> from django.core.cache.utils import make_template_fragment_key
+    # cache key for {% cache 500 sidebar username %}
+    >>> key = make_template_fragment_key('sidebar', [username])
+    >>> cache.delete(key) # invalidates cached template fragment
+
+-------------
+
+##### The low-level cache API
+
 
 
 
