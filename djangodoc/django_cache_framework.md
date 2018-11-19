@@ -260,11 +260,11 @@ Django可以将其缓存的数据存储在数据库中。 如果你有一个快�
 
 缓存后端需要实现自己的剔除策略（即locmem， filesystem 和 database 后端）将遵循以下选项：
 
-+ 
- + MAX_ENTRIES： 删除旧值之前缓存中允许的最大条目数。 此参数默认为300。
+- 
+  - MAX_ENTRIES： 删除旧值之前缓存中允许的最大条目数。 此参数默认为300。
+  
+  - CULL_FREQUENCY： 达到 MAX_ENTRIES 时剔除的条目部分。 实际比率为 1 / CULL_FREQUENCY， 因此将 CULL_FREQUENCY 设置为2可在达到 MAX_ENTRIES 时剔除一半条目。 此参数应为整数， 默认为3。
 
- + CULL_FREQUENCY： 达到 MAX_ENTRIES 时剔除的条目部分。 实际比率为 1 / CULL_FREQUENCY， 因此将 CULL_FREQUENCY 设置为2可在达到 MAX_ENTRIES 时剔除一半条目。 此参数应为整数， 默认为3。
- 
  CULL_FREQUENCY 的值为0意味着在达到 MAX_ENTRIES 时将转储整个缓存。 在一些后端（特别是数据库）上， 这使得剔除速度更快， 但代价是更多的缓存未命中。
  
 Memcached后端将 OPTIONS 的内容作为关键字参数传递给客户端构造函数， 从而允许对客户端行为进行更高级的控制。 例如， 请参见下文。
