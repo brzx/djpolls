@@ -475,85 +475,297 @@ key_prefix 和 cache 参数可以一起指定。 将连接 key_prefix 参数和 
 
 #### The low-level cache API
 
+有时候， 缓存整个渲染页面并不会给你带来太大的好处， 实际上是不方便的过度杀伤(inconvenient overkill)。
 
+例如， 您的站点可能包含一个视图， 其结果取决于几个昂贵的查询， 其结果会在不同的时间间隔内发生变化。 在这种情况下， 使用每站点或每个视图缓存策略提供的整页缓存并不理想， 因为您不希望缓存整个结果（因为某些数据经常更改）， 但你仍然想要缓存很少改变的结果。
 
+对于这样的情况， Django公开了一个简单的低级缓存API。 您可以使用此API以任意级别的粒度在缓存中存储对象。 您可以缓存任何可以安全序列化(pickled)的Python对象： 字符串， 字典， 模型对象列表等。 （大部分的Python对象都可以被序列化; 有关序列化(pickling)的更多信息， 请参阅Python文档。）
 
+##### Accessing the cache
 
+django.core.cache.caches
 
+您可以通过 dict-like 的对象访问在 CACHES 设置中配置好的缓存： django.core.cache.caches。 在同一个线程中对同一别名的重复请求将返回相同的对象。
 
+    >>> from django.core.cache import caches
+    >>> cache1 = caches['myalias']
+    >>> cache2 = caches['myalias']
+    >>> cache1 is cache2
+    True
 
+如果指定的键不存在， 将引发 InvalidCacheBackendError 错误。
 
+为了提供线程安全性， 将为每个线程返回缓存后端的不同实例。
 
+django.core.cache.cache
 
+作为快捷方式， 默认缓存可用作 django.core.cache.cache：
 
+    >>> from django.core.cache import cache
 
+该对象相当于 caches['default']。
+    
+-------------
 
+##### Basic usage
 
+基本接口是：
 
+cache.set(key, value, timeout=DEFAULT_TIMEOUT, version=None)
 
+    >>> cache.set('my_key', 'hello, world!', 30)
 
+cache.get(key, default=None, version=None)
 
+    >>> cache.get('my_key')
+    'hello, world!'
 
+key 应该是一个 str， value 可以是任何可序列化(picklable)的Python对象。
 
+timeout参数是可选的， 默认为CACHES设置中相应后端的超时参数（如上所述）。 它的值是秒， 并应被存储在缓存中。 为超时传递 None 将永远缓存该值。 timeout 设为0则不会缓存该值。
 
+如果缓存中不存在该对象， 则 cache.get() 返回 None：
 
+    >>> # Wait 30 seconds for 'my_key' to expire...
+    >>> cache.get('my_key')
+    None
 
+我们建议不要在缓存中存储字面值 None， 因为您将无法区分存储的 None 值和由返回值 None 表示的缓存未命中。
 
+cache.get() 可以采用 default 参数。 如果缓存中不存在该对象， 则返回默认值：
 
+    >>> cache.get('my_key', 'has expired')
+    'has expired'
 
+cache.add(key, value, timeout=DEFAULT_TIMEOUT, version=None)
 
+要仅在密钥尚不存在时添加密钥， 请使用 add() 方法。 它采用与 set() 相同的参数， 但如果指定的键已存在， 则不会尝试更新缓存：
 
+    >>> cache.set('add_key', 'Initial value')
+    >>> cache.add('add_key', 'New value')
+    >>> cache.get('add_key')
+    'Initial value'
 
+如果您需要知道 add() 是否在缓存中存储了值， 可以检查返回值。 如果存储了值， 它将返回 True， 否则返回 False。
 
+cache.get_or_set(key, default, timeout=DEFAULT_TIMEOUT, version=None)
 
+如果想要获取键值或者设置键值， 而键又不在缓存中， 可以用 get_or_set() 方法。 它采用与 get() 相同的参数， 但默认设置为该键的新缓存值， 而不是简单地返回：
 
+    >>> cache.get('my_new_key')  # returns None
+    >>> cache.get_or_set('my_new_key', 'my new value', 100)
+    'my new value'
 
+您还可以将任何可调用的值作为 *default* 值传递：
 
+    >>> import datetime
+    >>> cache.get_or_set('some-timestamp-key', datetime.datetime.now)
+    datetime.datetime(2014, 12, 11, 0, 15, 49, 457920)
 
+cache.get_many(keys, version=None)
 
+还有一个 get_many() 接口只能访问缓存一次。 get_many() 返回一个字典， 其中包含您请求的所有实际存在于缓存中（并且尚未过期）的键：
 
+    >>> cache.set('a', 1)
+    >>> cache.set('b', 2)
+    >>> cache.set('c', 3)
+    >>> cache.get_many(['a', 'b', 'c'])
+    {'a': 1, 'b': 2, 'c': 3}
 
+cache.set_many(dict, timeout)
 
+要更有效地设置多个值， 请使用 set_many() 传递键值对的字典：
 
+    >>> cache.set_many({'a': 1, 'b': 2, 'c': 3})
+    >>> cache.get_many(['a', 'b', 'c'])
+    {'a': 1, 'b': 2, 'c': 3}
 
+与 cache.set() 类似， set_many() 采用可选的 timeout 参数。
 
+在支持的后端（memcached）上， set_many() 返回无法插入的键列表。
 
+> 在Django 2.0中更改：
+> 包含失败键列表的返回值已添加。
 
+cache.delete(key, version=None)
 
+您可以使用 delete() 显式删除键。 这是清除特定对象的缓存的简单方法：
 
+    >>> cache.delete('a')
 
+cache.delete_many(keys, version=None)
 
+如果要一次清除一批键， 可以用 delete_many() 来清除键列表：
 
+    >>> cache.delete_many(['a', 'b', 'c'])
 
+cache.clear()
 
+最后， 如果要删除缓存中的所有键， 请使用 cache.clear()。 小心使用这个; clear() 将从缓存中删除所有内容， 而不仅仅是应用程序设置的密钥。
 
+    >>> cache.clear()
 
+cache.touch(key, timeout=DEFAULT_TIMEOUT, version=None)
 
+> New in Django 2.1:
 
+cache.touch() 为键设置新的过期时间。 例如， 要将键更新为从现在起10秒后过期：
 
+    >>> cache.touch('a', 10)
+    True
 
+与其他方法一样， timeout 参数是可选的， 默认为 CACHES 设置中相应后端的 TIMEOUT 选项。
 
+如果成功对键执行了 touch()， 则 touch() 返回 True， 否则返回 False。
 
+cache.incr(key, delta=1, version=None)
 
+cache.decr(key, delta=1, version=None)
 
+您还可以分别使用 incr() 或 decr() 方法递增或递​​减已存在的键。 默认情况下， 现有缓存值将递增或递减1. 可以通过为递增/递减调用提供参数来指定其他递增/递减值。 如果您尝试递增或递减不存在的缓存键， 将引发 ValueError：
 
+    >>> cache.set('num', 1)
+    >>> cache.incr('num')
+    2
+    >>> cache.incr('num', 10)
+    12
+    >>> cache.decr('num')
+    11
+    >>> cache.decr('num', 5)
+    6
 
+> 注意
+> incr()/decr() 方法不保证是原子的。 在那些支持原子递增/递减的后端（最特别的是， memcached后端）， 递增和递减操作将是原子的。 但是， 如果后端本身不提供递增/递减操作， 则将使用两步检索/更新来实现。
 
+cache.close()
 
+如果缓存由后端实现， 则可以使用 close() 关闭与缓存的连接。
 
+    >>> cache.close()
 
+> 注意
+> 对于没有实现 close 方法的缓存， 它是一个no-op(空指令或者无操作)。
 
+-------------
 
+##### Cache key prefixing
 
+如果要在服务器之间或生产环境与开发环境之间共享缓存实例， 则一台服务器缓存的数据可能会被另一台服务器使用。 如果服务器之间的缓存数据格式不同， 这可能会导致一些非常难以诊断的问题。
 
+为了防止这种情况， Django提供了为服务器使用的所有缓存键添加前缀的功能。 当保存或检索特定的缓存键时， Django将自动为缓存键添加 KEY_PREFIX 缓存设置的值。
 
+通过确保每个Django实例具有不同的KEY_PREFIX， 您可以确保缓存值中不会发生冲突。
 
+-------------
 
+##### Cache versioning
 
+更改使用缓存值的运行代码时， 可能需要清除任何现有缓存值。 最简单的方法是刷新整个缓存， 但这可能会导致丢失仍然有效且有用的缓存值。
 
+Django提供了一种更好的方法来定位单个缓存值。 Django的缓存框架具有系统范围的版本标识符， 使用 VERSION 缓存设置指定。 此设置的值将自动与缓存前缀和用户提供的缓存键组合以获取最终缓存键。
 
+默认情况下， 任何键请求都将自动包含站点默认缓存键版本。 但是， 原始缓存函数都包含 version 参数， 因此您可以指定要设置或获取的特定缓存键版本。 例如：
 
+    >>> # Set version 2 of a cache key
+    >>> cache.set('my_key', 'hello world!', version=2)
+    >>> # Get the default version (assuming version=1)
+    >>> cache.get('my_key')
+    None
+    >>> # Get version 2 of the same key
+    >>> cache.get('my_key', version=2)
+    'hello world!'
 
+可以使用 incr_version() 和 decr_version() 方法递增和递减特定键的版本。 这使得特定键可以碰撞到新版本， 而其他键不受影响(This enables specific keys to be bumped to a new version, leaving other keys unaffected.)。 继续前面的例子：
+
+    >>> # Increment the version of 'my_key'
+    >>> cache.incr_version('my_key')
+    >>> # The default version still isn't available
+    >>> cache.get('my_key')
+    None
+    # Version 2 isn't available, either
+    >>> cache.get('my_key', version=2)
+    None
+    >>> # But version 3 *is* available
+    >>> cache.get('my_key', version=3)
+    'hello world!'
+
+-------------
+
+##### Cache key transformation
+
+如前两节所述， 用户提供的缓存键不是逐字使用的 - 它与缓存前缀和键版本相结合， 以提供最终缓存键。 默认情况下， 使用冒号连接这三个部分以生成最终字符串：
+
+    def make_key(key, key_prefix, version):
+        return ':'.join([key_prefix, str(version), key])
+
+如果要以不同方式组合部件， 或对最终键应用其他处理（例如， 获取关键部件的hash digest）， 则可以提供自定义键函数。
+
+KEY_FUNCTION 缓存设置可以指定一个 dotted-path 的函数， 且与上面的 make_key() 原型匹配。 如果提供了， 将使用此自定义键函数而不是默认键组合函数。
+
+-------------
+
+##### Cache key warnings
+
+Memcached是最常用的生产缓存后端， 它不允许超过250个字符的缓存键或包含空格或控制字符， 如果使用此类键会导致异常。 为了鼓励缓存可移植代码并最大限度地减少令人不快的意外， 如果使用会导致memcached错误的密钥， 则其他内置缓存后端会发出警告(django.core.cache.backends.base.CacheKeyWarning)。
+(Memcached, the most commonly-used production cache backend, does not allow cache keys longer than 250 characters or containing whitespace or control characters, and using such keys will cause an exception. To encourage cache-portable code and minimize unpleasant surprises, the other built-in cache backends issue a warning (django.core.cache.backends.base.CacheKeyWarning) if a key is used that would cause an error on memcached.)
+
+如果您使用的生产后端可以接受更广泛的键（自定义后端或其中一个非memcached内置后端）， 并希望在没有警告的情况下使用更宽范围， 则可以使用此代码使 CacheKeyWarning 静音在您的一个 INSTALLED_APPS 的 management 模块中：
+(If you are using a production backend that can accept a wider range of keys (a custom backend, or one of the non-memcached built-in backends), and want to use this wider range without warnings, you can silence CacheKeyWarning with this code in the management module of one of your INSTALLED_APPS:)
+
+    import warnings
+    
+    from django.core.cache import CacheKeyWarning
+    
+    warnings.simplefilter("ignore", CacheKeyWarning)
+
+如果您想为其中一个内置后端提供自定义键验证逻辑， 则可以对其进行子类化， 仅覆盖 validate_key 方法， 并按照使用自定义缓存后端 [using a custom cache backend](https://docs.djangoproject.com/en/2.1/topics/cache/#using-a-custom-cache-backend) 的说明进行操作。 例如， 要为 locmem 后端执行此操作， 请将以下代码放在模块中：
+
+    from django.core.cache.backends.locmem import LocMemCache
+    
+    class CustomLocMemCache(LocMemCache):
+        def validate_key(self, key):
+            """Custom validation, raising exceptions or warnings as needed."""
+            ...
+
+...并在 CACHES 设置的 BACKEND 部分中使用 dotted Python 路径指向这个类。
+
+-------------
+
+#### Downstream caches
+
+到目前为止， 本文档主要关注缓存您自己的数据。 但另一种类型的缓存也与Web开发相关： 由“下游”缓存执行的缓存。 这些系统甚至在请求到达您的网站之前就会为用户缓存页面。
+
+以下是下游缓存的一些示例：
+
+- 您的 ISP 可能会缓存某些页面， 因此如果您从 https://example.com/ 请求了某个页面， 您的 ISP 可能会向您发送该页面而无需直接访问 example.com。 example.com 的维护者不知道这个缓存; ISP 位于 example.com 和您的 Web 浏览器之间， 透明地处理所有缓存。
+
+- 您的 Django 网站可能位于代理缓存之后， 例如 Squid Web 代理缓存（http://www.squid-cache.org/）， 它会缓存页面以提高性能。 在这种情况下， 每个请求首先由代理处理， 只有在需要时才会传递给您的应用程序。
+
+- 您的 Web 浏览器也会缓存页面。 如果网页发出相应的头部， 您的浏览器将使用本地缓存副本来获取对该页面的后续请求， 甚至无需再次联系网页以查看其是否已更改。
+
+下游缓存可以很好的提升效率， 但它有一个危险： 许多网页的内容根据身份验证和许多其他变量而有所不同， 并且基于 URL 盲目保存页面的缓存系统可能会将不正确或敏感数据暴露给后续
+这些页面的访问者。
+
+例如， 假设您运行 Web 电子邮件系统， “收件箱”页面的内容显然取决于登录的用户。 如果 ISP 盲目缓存您的站点， 那么通过该 ISP 登录的第一个用户将拥有他们的
+为后续访问该网站的用户缓存的特定于用户的收件箱页面。 这就不好了。
+
+幸运的是， HTTP 提供了解决此问题的方法。 存在许多HTTP头以指示下游缓存根据指定的变量区分其缓存内容， 并告知缓存机制不缓存特定页面。 我们将在后面的部分中介绍其中的一些头部。
+
+-------------
+
+#### Using Vary headers
+
+Vary 头定义了缓存机制在构建其缓存键时应考虑的请求头。 例如， 如果网页的内容取决于用户的语言设置， 则该页面被称为“因语言而异”。
+
+默认情况下， Django的缓存系统使用请求的完全限定(fully-qualified) URL 创建其缓存键 - 例如，“https://www.example.com/stories/2005/?order_by=author”。 这意味着对该 URL 的每个请求都将使用相同的缓存版本， 无论用户代理差异如cookie或语言设置如何。 但是， 如果此页面根据请求头中的某些差异（例如cookie， 语言或用户代理）生成不同的内容， 则需要使用 Vary 头来告知页面输出所依赖的缓存机制。
+
+要在Django中执行此操作， 请使用方便的 django.views.decorators.vary.vary_on_headers() 视图装饰器， 如下所示：
+
+    from django.views.decorators.vary import vary_on_headers
+    
+    @vary_on_headers('User-Agent')
+    def my_view(request):
+        ...
 
 
 
