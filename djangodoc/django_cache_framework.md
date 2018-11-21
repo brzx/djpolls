@@ -1,4 +1,5 @@
-## Django 的缓存框架 [Django’s cache framework](https://docs.djangoproject.com/en/2.1/topics/cache/)
+## Django 的缓存框架 
+> ### [Django’s cache framework](https://docs.djangoproject.com/en/2.1/topics/cache/)
 > 翻译官: Brian Zhu
 
 动态网站的基本权衡是， 它们是动态的。 每次用户请求一个页面时， Web服务器都会进行各种计算 - 从数据库查询到模板呈现再到业务逻辑 - 以创建站点访问者看到的页面。 从处理开销的角度来看， 这比标准的文件读取文件系统服务器安排要昂贵得多。
@@ -767,5 +768,121 @@ Vary 头定义了缓存机制在构建其缓存键时应考虑的请求头。 �
     def my_view(request):
         ...
 
+在这种情况下， 缓存机制（例如Django自己的缓存中间件）将为每个唯一的用户代理缓存单独版本的页面。
+
+使用 vary_on_headers 装饰器而不是手动设置 Vary 头(使用类似response ['Vary'] ='user-agent')的优点是装饰器添加到 Vary 头(可能已经存在)， 而不是设置它从头开始， 可能会覆盖那里已有的任何东西。
+
+您可以将多个头部传递给 vary_on_headers()：
+
+    @vary_on_headers('User-Agent', 'Cookie')
+    def my_view(request):
+        ...
+
+这告诉下游缓存两者都有所不同， 这意味着 user-agent 和 cookie 的每个组合都将获得自己的缓存值。 例如， 使用用户代理 Mozilla 和 cookie值 foo = bar 的请求将被视为与使用用户代理 Mozilla 和 cookie 值 foo = ham 的请求不同。
+
+因为cookie的变化很常见， 所以有一个 django.views.decorators.vary.vary_on_cookie() 的装饰器。 这两个视图是等效的：
+
+    @vary_on_cookie
+    def my_view(request):
+        ...
+    
+    @vary_on_headers('Cookie')
+    def my_view(request):
+        ...
+
+传递给 vary_on_headers 的头不区分大小写; “User-Agent” 与 “user-agent” 是相同的。
+
+您也可以直接使用辅助函数 django.utils.cache.patch_vary_headers()。 此函数设置或添加 Vary deader。 例如：
+
+    from django.shortcuts import render
+    from django.utils.cache import patch_vary_headers
+    
+    def my_view(request):
+        ...
+        response = render(request, 'template_name', context)
+        patch_vary_headers(response, ['Cookie'])
+        return response
+
+patch_vary_headers 将 HttpResponse 实例作为其第一个参数， 将不区分大小写的头名称的列表/元组作为其第二个参数。
+
+有关 Vary headers 的更多信息， 请参阅官方的 Vary 规范 [official Vary spec](https://tools.ietf.org/html/rfc7231.html#section-7.1.4) 。
+
+-------------
+
+#### Controlling cache: Using other headers
+
+缓存的其他问题是数据的隐私性以及在级联缓存中数据应该存储到哪的问题。
+
+用户通常面临两种缓存： 他们自己的浏览器缓存（私有缓存）和他们的提供者缓存（公共缓存）。 公共缓存由多个用户使用， 并由其他人控制。 这会导致敏感数据出现问题 - 例如， 您不希望在公共缓存中存储银行帐号。 因此， Web应用程序需要一种方法来告诉缓存哪些数据是私有的， 哪些是公共的。
+
+解决方案是指示页面的缓存应该是“私有的”。 要在Django中执行此操作， 请使用 cache_control() 视图装饰器。
+
+    from django.views.decorators.cache import cache_control
+    
+    @cache_control(private=True)
+    def my_view(request):
+        ...
+
+这个装饰器负责在幕后发送适当的 HTTP 头。
+
+请注意， 缓存控制设置 “private” 和 “public” 是互斥的。 如果应该设置 “private”， 装饰器确保删除 “public” 指令（反之亦然）。 这两个指令的示例用法是提供私人和公共条目的博客站点。 公共条目可以缓存在任何共享缓存上。 以下代码使用 patch_cache_control()， 手动方式修改缓存控件头（它由 cache_control() 装饰器在内部调用）：
+
+    from django.views.decorators.cache import patch_cache_control
+    from django.views.decorators.vary import vary_on_cookie
+    
+    @vary_on_cookie
+    def list_blog_entries_view(request):
+        if request.user.is_anonymous:
+            response = render_only_public_entries()
+            patch_cache_control(response, public=True)
+        else:
+            response = render_private_and_public_entries(request.user)
+            patch_cache_control(response, private=True)
+    
+        return response
+
+您也可以通过其他方式控制下游缓存(有关HTTP缓存的详细信息， 请参阅 [RFC 7234](https://tools.ietf.org/html/rfc7234.html) )。 例如， 即使您不使用Django的服务器端缓存框架， 您仍然可以告诉客户端使用 [max-age](https://tools.ietf.org/html/rfc7234.html#section-5.2.2.8) 指令缓存视图一段时间：
+
+    from django.views.decorators.cache import cache_control
+    
+    @cache_control(max_age=3600)
+    def my_view(request):
+        ...
+
+(如果您确实使用了缓存中间件， 它已经使用 CACHE_MIDDLEWARE_SECONDS 设置的值设置了 max-age。 在这种情况下， cache_control() 装饰器中的自定义 max_age 将优先， 并且头值将正确合并。)
+
+任何有效的 Cache-Control 响应指令在 cache_control() 中都有效。 以下是一些例子：
+
+- no_transform=True
+
+- must_revalidate=True
+
+- stale_while_revalidate=num_seconds
+
+可以在 [IANA registry](https://www.iana.org/assignments/http-cache-directives/http-cache-directives.xhtml) 中找到已知指令的完整列表(请注意， 并非所有指令都适用于响应)。
+
+如果您想使用头来完全禁用缓存， 则 never_cache() 是一个视图装饰器， 它添加头以确保浏览器或其他缓存不会缓存响应。 例如：
+
+    from django.views.decorators.cache import never_cache
+    
+    @never_cache
+    def myview(request):
+        ...
+
+-------------
+
+#### Order of MIDDLEWARE
+
+如果使用缓存中间件， 将每一半(each half) 放在 MIDDLEWARE 设置中的正确位置非常重要。 这是因为缓存中间件需要知道哪些头可以改变缓存存储。 中间件总是会在 Vary 响应头中添加一些东西。
+
+UpdateCacheMiddleware 在响应阶段运行， 其中中间件以相反的顺序运行， 因此列表顶部的项目在响应阶段最后运行。 因此， 您需要确保 UpdateCacheMiddleware 出现在可能向 Vary 头添加内容的任何其他中间件之前。 以下中间件模块执行此操作：
+
+- SessionMiddleware adds Cookie
+
+- GZipMiddleware adds Accept-Encoding
+
+- LocaleMiddleware adds Accept-Language
+
+另一方面， FetchFromCacheMiddleware 在请求阶段运行， 其中中间件首先应用于中间件， 因此列表顶部的项目在请求阶段首先运行。 FetchFromCacheMiddleware 还需要在其他中间件更新Vary头之后运行， 因此 FetchFromCacheMiddleware 必须在任何这样做的项之后。
 
 
