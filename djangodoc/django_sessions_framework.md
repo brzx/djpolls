@@ -6,7 +6,7 @@
 
 Django为匿名会话提供全面支持。 会话框架允许您基于每个站点访问者存储和检索任意数据。 它在服务器端存储数据并抽象 cookies 的发送和接收。 Cookies 包含会话ID - 而不是数据本身(除非您使用基于cookie的后端 [cookie based backend](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#cookie-session-backend) )。
 
-### Enabling sessions
+### 启用会话
 
 会话通过一些中间件 [middleware](https://docs.djangoproject.com/en/2.1/ref/middleware/) 实现。
 
@@ -94,25 +94,51 @@ Django为匿名会话提供全面支持。 会话框架允许您基于每个站�
 
 #### 在视图中使用会话
 
+当 SessionMiddleware 被激活时， 每个 HttpRequest 对象 - 任何Django视图函数的第一个参数 - 都含有 session 属性， 这是一个类似字典的对象。
 
+您可以在视图中的任何位置读取它， 或者写入 request.session。 您也可以多次编辑它。
 
+**class backends.base.SessionBase**
 
+这是所有会话对象的基类。 它具有以下标准字典方法：
 
+**__getitem__(key)**
 
+  例如： fav_color = request.session['fav_color']
 
+**__setitem__(key, value)**
 
+  例如： request.session['fav_color'] = 'blue'
 
+**__delitem__(key)**
 
+  例如： del request.session['fav_color']. 如果给定的键不在会话中， 则会引发 KeyError。
 
+**__contains__(key)**
 
+  例如： 'fav_color' in request.session
 
+**get(key, default=None)**
 
+  例如： fav_color = request.session.get('fav_color', 'red')
 
+**pop(key, default=__not_given)**
 
+  例如： fav_color = request.session.pop('fav_color', 'blue')
 
+**keys()**
 
+**items()**
 
+**setdefault()**
 
+**clear()**
+
+它还有以下方法：
+
+**flush()**
+
+    从会话中删除当前会话数据并删除会话cookie。 如果要确保无法从用户的浏览器再次访问先前的会话数据(例如， django.contrib.auth.logout() 函数调用它)， 则使用此方法。
 
 
 
