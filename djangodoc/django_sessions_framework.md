@@ -272,13 +272,316 @@ Django为匿名会话提供全面支持。 会话框架允许您基于每个站�
 
 #### 设置测试 cookies
 
+为方便起见， Django提供了一种简单的方法来测试用户的浏览器是否接受cookies。 只需在视图中调用 request.session 的 set_test_cookie() 方法， 然后在后续视图中调用 test_cookie_worked() - 而不是在同一个视图调用中。
+
+由于cookies的工作方式， set_test_cookie() 和 test_cookie_worked() 之间的这种尴尬分割是必要的。 当您设置cookie时， 您无法确定浏览器是否接受它直到浏览器的下一个请求。
+
+最好使用 delete_test_cookie() 自行清理。 在您确认测试cookie有效之后执行此操作。
+
+下面是一个典型的用法示例：
+
+from django.http import HttpResponse
+from django.shortcuts import render
+
+    def login(request):
+        if request.method == 'POST':
+            if request.session.test_cookie_worked():
+                request.session.delete_test_cookie()
+                return HttpResponse("You're logged in.")
+            else:
+                return HttpResponse("Please enable cookies and try again.")
+        request.session.set_test_cookie()
+        return render(request, 'foo/login_form.html')
+
+-------------
+
+#### 在视图外使用会话
+
+> 注意
+
+> 本节中的示例直接从 django.contrib.sessions.backends.db 后端导入 SessionStore 对象。 在您自己的代码中， 您应该考虑从 SESSION_ENGINE 指定的会话引擎导入 SessionStore， 如下所示：
+
+    >>> from importlib import import_module
+    >>> from django.conf import settings
+    >>> SessionStore = import_module(settings.SESSION_ENGINE).SessionStore
+
+有一个API可用于处理视图外的会话数据：
+
+    >>> from django.contrib.sessions.backends.db import SessionStore
+    >>> s = SessionStore()
+    >>> # stored as seconds since epoch since datetimes are not serializable in JSON.
+    >>> s['last_login'] = 1376587691
+    >>> s.create()
+    >>> s.session_key
+    '2b1189a188b44ad18c35e113ac6ceead'
+    >>> s = SessionStore(session_key='2b1189a188b44ad18c35e113ac6ceead')
+    >>> s['last_login']
+    1376587691
+
+SessionStore.create() 旨在创建一个新会话(即未从会话存储加载并且 session_key=None 的会话)。 save() 旨在保存现有会话(即从会话存储加载的会话)。 在新会话上调用 save() 也可能有效， 但生成与现有会话冲突的 session_key 的可能性很小。 create() 调用 save() 并循环， 直到生成未使用的 session_key。
+
+如果您使用的是 django.contrib.sessions.backends.db 后端， 则每个会话只是一个普通的Django模型。 会话模型在 django/contrib/sessions/models.py 中定义。 因为它是普通模型， 所以您可以使用普通的Django数据库API访问会话：
+
+    >>> from django.contrib.sessions.models import Session
+    >>> s = Session.objects.get(pk='2b1189a188b44ad18c35e113ac6ceead')
+    >>> s.expire_date
+    datetime.datetime(2005, 8, 20, 13, 35, 12)
+
+请注意， 您需要调用 get_decoded() 来获取会话字典。 这是必要的， 因为字典以编码格式存储：
+
+    >>> s.session_data
+    'KGRwMQpTJ19hdXRoX3VzZXJfaWQnCnAyCkkxCnMuMTExY2ZjODI2Yj...'
+    >>> s.get_decoded()
+    {'user_id': 42}
+
+-------------
+
+#### 什么时候保存会话
+
+默认情况下， Django仅在会话被修改时保存到会话数据库 - 即， 如果已分配或删除任何字典值：
+
+    # Session is modified.
+    request.session['foo'] = 'bar'
+
+    # Session is modified.
+    del request.session['foo']
+
+    # Session is modified.
+    request.session['foo'] = {}
+
+    # Gotcha: Session is NOT modified, because this alters
+    # request.session['foo'] instead of request.session.
+    request.session['foo']['bar'] = 'baz'
+
+在上面示例的最后一种情况中， 我们可以通过在会话对象上设置 modified 属性来明确告诉会话对象它已被修改：
+
+    request.session.modified = True
+
+要更改此默认行为， 请将 SESSION_SAVE_EVERY_REQUEST 设置为 True。 设置为 True 时， Django会在每次请求时将会话保存到数据库。
+
+请注意， 会话cookie仅在创建或修改会话时发送。 如果 SESSION_SAVE_EVERY_REQUEST 为 True， 则会在每次请求时发送会话cookie。
+
+同样， 每次发送会话cookie时， 会话cookie的过期部分都会被更新。
+
+如果响应的状态代码为500， 则不会保存会话。
+
+-------------
+
+#### 浏览器长度会话与持久会话 (Browser-length sessions vs. persistent sessions)
+
+您可以通过设置 SESSION_EXPIRE_AT_BROWSER_CLOSE 来控制会话框架是使用 browser-length sessions 还是使用 persistent sessions。
+
+默认情况下， SESSION_EXPIRE_AT_BROWSER_CLOSE 设置为 False， 这意味着会话cookie将存储在用户的浏览器中， 持续时间为 SESSION_COOKIE_AGE。 如果您不希望人们每次打开浏览器时都必须登录， 请使用此选项。
+
+如果 SESSION_EXPIRE_AT_BROWSER_CLOSE 设置为 True， Django将使用 browser-length cookies - 一旦用户关闭浏览器就会过期的cookies。 如果您希望人们每次打开浏览器时都必须登录， 请使用此选项。
+
+此设置是全局默认值， 可以通过显式调用 request.session 的 set_expiry() 方法在每个会话级别覆盖， 如上所述在视图中使用会话。
+
+> 注意
+
+> 某些浏览器(例如 Chrome)提供的设置允许用户在关闭并重新打开浏览器后继续浏览会话。 在某些情况下， 这可能会干扰 SESSION_EXPIRE_AT_BROWSER_CLOSE 设置， 并阻止会话在浏览器关闭时到期。 在测试启用了 SESSION_EXPIRE_AT_BROWSER_CLOSE 设置的Django应用程序时请注意这一点。
+
+-------------
+
+#### 清除会话存储
+
+当用户在您的网站上创建新会话时， 会话数据可能会累积在您的会话存储中。 如果您正在使用数据库后端， 则 django_session 数据库表将增长。 如果您正在使用文件后端， 则您的临时目录将包含越来越多的文件。
+
+要了解此问题， 请考虑数据库后端会发生什么。 当用户登录时， Django会在 django_session 数据库表中添加一行。 每次会话数据更改时， Django都会更新此行。 如果用户手动注销， Django将删除该行。 但是如果用户没有注销， 则该行永远不会被删除。 文件后端也会发生类似的过程。
+
+Django不自动清除过期的会话。 因此， 定期清除过期的会话需要您手动处理。 Django为此提供了一个清理管理命令： [clearsessions](https://docs.djangoproject.com/en/2.1/ref/django-admin/#django-admin-clearsessions) 。 建议定期调用此命令， 例如作为每日cron作业。
+
+请注意， 缓存后端不容易受到此问题的影响， 因为缓存会自动删除过时数据。 Cookie后端也不是， 因为会话数据是由用户的浏览器存储的。
+
+-------------
+
+#### 设置
+
+一些 [Django settings](https://docs.djangoproject.com/en/2.1/ref/settings/#settings-sessions) 可让您控制会话行为：
+
+- [SESSION_CACHE_ALIAS](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_CACHE_ALIAS)
+
+- [SESSION_COOKIE_AGE](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_COOKIE_AGE)
+
+- [SESSION_COOKIE_DOMAIN](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_COOKIE_DOMAIN)
+
+- [SESSION_COOKIE_HTTPONLY](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_COOKIE_HTTPONLY)
+
+- [SESSION_COOKIE_NAME](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_COOKIE_NAME)
+
+- [SESSION_COOKIE_PATH](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_COOKIE_PATH)
+
+- [SESSION_COOKIE_SAMESITE](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_COOKIE_SAMESITE)
+
+- [SESSION_COOKIE_SECURE](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_COOKIE_SECURE)
+
+- [SESSION_ENGINE](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_ENGINE)
+
+- [SESSION_EXPIRE_AT_BROWSER_CLOSE](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_EXPIRE_AT_BROWSER_CLOSE)
+
+- [SESSION_FILE_PATH](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_FILE_PATH)
+
+- [SESSION_SAVE_EVERY_REQUEST](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_SAVE_EVERY_REQUEST)
+
+- [SESSION_SERIALIZER](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_SERIALIZER)
+
+-------------
+
+#### 会话安全性
+
+站点内的子域可以在客户端上为整个域设置cookies。 如果允许来自不受可信用户控制的子域的cookies， 则可以进行会话固定。 (Subdomains within a site are able to set cookies on the client for the whole domain. This makes session fixation possible if cookies are permitted from subdomains not controlled by trusted users.)
+
+例如， 攻击者可以登录 good.example.com 并获取其帐户的有效会话。 如果攻击者可以控制 bad.example.com， 他们可以使用它向您发送会话键， 因为允许子域在 * .example.com 上设置cookies。 当您访问 good.example.com 时， 您将以攻击者身份登录， 并可能无意中将您的敏感个人数据(例如信用卡信息)输入攻击者帐户。
+
+另一种可能的攻击方式是， 如果 good.example.com 将其 SESSION_COOKIE_DOMAIN 设置为 “example.com”， 这会导致该站点的会话 cookies 被发送到 bad.example.com。
+
+-------------
+
+#### 技术细节
+
+- 在使用 PickleSerializer 时， 会话字典接受任何可选择的Python对象， 或在使用 JSONSerializer 时， 会话字典接受任何 json 可序列化值。 有关更多信息， 请参阅 [pickle](https://docs.python.org/3/library/pickle.html#module-pickle) 模块。
+
+- 会话数据存储在名为 django_session 的数据库表中。
+
+- Django只在需要时才发送cookie。 如果您未设置任何会话数据， 则不会发送会话cookie。
+
+#### SessionStore 对象
+
+在内部使用会话时， Django使用来自相应会话引擎的会话存储对象。 按照惯例， 会话存储对象类名为 SessionStore， 位于 [SESSION_ENGINE](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_ENGINE) 指定的模块中。
+
+Django中可用的所有 SessionStore 类都继承自 [SessionBase](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#django.contrib.sessions.backends.base.SessionBase) 并实现数据操作方法， 即：
+
+- exists()
+
+- create()
+
+- save()
+
+- delete()
+
+- load()
+
+- clear_expired()
+
+为了构建自定义会话引擎或自定义现有会话引擎， 您可以创建一个继承自 [SessionBase](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#django.contrib.sessions.backends.base.SessionBase) 或任何其他现有 SessionStore 类的新类。
+
+扩展大多数会话引擎非常简单， 但使用数据库支持的会话引擎这样做通常需要一些额外的工作(有关详细信息，请参阅下一节)。
+
+-------------
+
+#### 扩展数据库支持的会话引擎
+
+创建一个基于Django中包含的自定义数据库支持的会话引擎(即 db 和 cached_db)可以通过继承 [AbstractBaseSession](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#django.contrib.sessions.base_session.AbstractBaseSession) 和 SessionStore] 类来完成。
+
+AbstractBaseSession 和 BaseSessionManager 可从 django.contrib.sessions.base_session 导入， 以便可以导入它们而不用在 INSTALLED_APPS 中包含 django.contrib.sessions。
+
+class **base_session.AbstractBaseSession**
+
+抽象基础会话模型。(The abstract base session model.)
+
+**session_key**
+
+主键。 字段本身最多可包含40个字符。 当前实现是生成一个32个字符的字符串(随机数字和小写ASCII字母序列)。
+
+**session_data**
+
+包含编码和序列化会话字典的字符串。
+
+**expire_date**
+
+指定会话过期时的 datetime 类型。
+
+过期的会话不可供用户使用， 但是， 在 [clearsessions](https://docs.djangoproject.com/en/2.1/ref/django-admin/#django-admin-clearsessions) 管理命令运行之前， 它们仍可能存储在数据库中。
+
+classmethod **get_session_store_class()**
+
+返回要与此会话模型一起使用的会话存储类。
+
+**get_decoded()**
+
+返回解码的会话数据。
+
+解码由会话存储类执行。
 
 
+您还可以通过继承 [BaseSessionManager](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#django.contrib.sessions.base_session.BaseSessionManager) 来自定义模型管理器：
+
+class **base_session.BaseSessionManager**
+
+**encode**(session_dict)
+
+返回序列化并编码为字符串的给定会话字典。
+
+编码由绑定到模型类的会话存储类执行。
+
+**save**(session_key, session_dict, expire_date)
+
+保存提供的会话键的会话数据， 或者在数据为空的情况下删除会话。
 
 
+通过覆盖下面描述的方法和属性来实现 SessionStore 类的自定义：
+
+class **backends.db.SessionStore**
+
+实现数据库支持的会话存储。
+
+classmethod **get_model_class()**
+
+如果需要， 可以重写此方法以返回自定义会话模型。
+
+**create_model_instance**(data)
+
+返回会话模型对象的新实例， 该实例表示当前会话状态。
+
+覆盖此方法可以在将会话模型数据保存到数据库之前对其进行修改。
+
+class **backends.cached_db.SessionStore**
+
+实现缓存的数据库支持的会话存储。
+
+**cache_key_prefix**
+
+添加到会话键以构建缓存密钥字符串的前缀。
 
 
+#### 例子
 
+下面的示例显示了一个自定义数据库支持的会话引擎， 其中包含一个用于存储帐户 ID 的附加数据库列(从而为查询数据库以查找帐户的所有活动会话)：
 
+    from django.contrib.sessions.backends.db import SessionStore as DBStore
+    from django.contrib.sessions.base_session import AbstractBaseSession
+    from django.db import models
 
+    class CustomSession(AbstractBaseSession):
+        account_id = models.IntegerField(null=True, db_index=True)
 
+        @classmethod
+        def get_session_store_class(cls):
+            return SessionStore
+
+    class SessionStore(DBStore):
+        @classmethod
+        def get_model_class(cls):
+            return CustomSession
+
+        def create_model_instance(self, data):
+            obj = super().create_model_instance(data)
+            try:
+                account_id = int(data.get('_auth_user_id'))
+            except (ValueError, TypeError):
+                account_id = None
+            obj.account_id = account_id
+            return obj
+
+如果要从Django的内置 cached_db 会话存储迁移到基于 cached_db 的自定义存储， 则应覆盖缓存键前缀以防止命名空间冲突：
+
+    class SessionStore(CachedDBStore):
+        cache_key_prefix = 'mysessions.custom_cached_db_backend'
+
+        # ...
+
+-------------
+
+#### URL 中的会话 ID (Session IDs in URLs)
+
+Django会话框架完全且完全基于cookie。 作为最后的手段， 它不会像在 PHP 那样将 URL 中的会话 ID 放回去。 这是一个有意的设计决定。 这种行为不仅会使 URL 变得丑陋， 而且还会使您的网站通过 “Referer” 头容易受到会话 ID 盗窃的攻击。
