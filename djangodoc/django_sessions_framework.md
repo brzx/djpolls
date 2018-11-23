@@ -138,48 +138,139 @@ Django为匿名会话提供全面支持。 会话框架允许您基于每个站�
 
 **flush()**
 
-    从会话中删除当前会话数据并删除会话cookie。 如果要确保无法从用户的浏览器再次访问先前的会话数据(例如， django.contrib.auth.logout() 函数调用它)， 则使用此方法。
+从会话中删除当前会话数据并删除会话cookie。 如果要确保无法从用户的浏览器再次访问先前的会话数据(例如， django.contrib.auth.logout() 函数调用它)， 则使用此方法。
+
+**set_test_cookie()**
+
+设置测试cookie以确定用户的浏览器是否支持cookie。 由于Cookies的工作方式， 在用户的下一页请求之前， 您将无法对此进行测试。 有关详细信息， 请参阅下面的 [Setting test cookies](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#setting-test-cookies) 。
+
+**test_cookie_worked()**
+
+返回 True 或 False， 具体取决于用户的浏览器是否接受测试cookie。 由于Cookies的工作方式， 您必须在之前单独的页面请求上调用 set_test_cookie()。 有关详细信息， 请参阅下面的 [Setting test cookies](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#setting-test-cookies) 。
+
+**delete_test_cookie()**
+
+删除测试cookie。 用它来清理自己。
+
+**set_expiry(value)**
+
+设置会话的过期时间。 您可以传递许多不同的值：
+
+- 如果 value 是一个整数， 则会话将在经过多秒不活动后过期。 例如， 调用 request.session.set_expiry(300) 会使会话在5分钟后过期。
+
+- 如果 value 是 datetime 或 timedelta 对象， 则会话将在该特定日期/时间过期。 请注意， 如果您使用的是 PickleSerializer， 则 datetime 和 timedelta 值只能序列化。
+
+- 如果 value 为 0， 则用户的会话cookie将在用户的Web浏览器关闭时过期。
+
+- 如果 value 为 None， 则会话将恢复为使用全局会话到期策略。
+
+读取会话不被视为过期目的的活动。 会话过期时间是从上次修改会话时计算出来的。
+
+**get_expiry_age()**
+
+返回此会话过期之前的秒数。 对于没有自定义过期的会话(或设置为在浏览器关闭时过期的会话)， 这将等于 SESSION_COOKIE_AGE。
+
+此函数接受与 get_expiry_age() 相同的关键字参数。
+
+**get_expire_at_browser_close()**
+
+返回 True 或 False， 具体取决于用户的Web浏览器关闭时用户的会话cookie是否过期。
+
+**clear_expired()**
+
+从会话存储中删除过期的会话。 这个类方法由 [clearsessions](https://docs.djangoproject.com/en/2.1/ref/django-admin/#django-admin-clearsessions) 调用。
+
+**cycle_key()**
+
+在保留当前会话数据的同时创建新的会话键。 django.contrib.auth.login() 调用此方法来减轻会话固定(mitigate against session fixation) 。
+
+#### 会话序列化
+
+默认情况下， Django使用JSON序列化会话数据。 您可以使用 [SESSION_SERIALIZER](https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-SESSION_SERIALIZER) 设置来自定义会话序列化格式。 即使您编写自己的序列化 [Write your own serializer](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#custom-serializers) 程序中描述了警告， 我们强烈建议您坚持使用JSON序列化， 尤其是在使用cookie后端时。
+
+例如， 如果您使用 [pickle](https://docs.python.org/3/library/pickle.html#module-pickle) 来序列化会话数据， 下面是一个攻击情境。 如果您正在使用 [signed cookie session backend](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#cookie-session-backend) 并且攻击者知道你的 SECRET_KEY (Django中没有可能导致其泄漏的固有漏洞)， 则攻击者可以在其会话中插入一个字符串， 当执行反序列化时， 可以在服务器上执行任意代码。 这样做的技术很简单， 并且可以在互联网上轻松获得。 虽然cookie会话存储会对cookie存储的数据进行签名以防止篡改， 但 SECRET_KEY 泄漏会立即升级为远程执行代码漏洞。
+
+##### 捆绑序列化器 (Bundled serializers)
+
+**class serializers.JSONSerializer**
+
+来自 django.core.signing 的JSON序列化程序的包装器。 只能序列化基本数据类型。
+
+此外， 由于JSON仅支持字符串键， 请注意在 request.session 中使用非字符串键将无法按预期工作：
+
+    >>> # initial assignment
+    >>> request.session[0] = 'bar'
+    >>> # subsequent requests following serialization & deserialization
+    >>> # of session data
+    >>> request.session[0]  # KeyError
+    >>> request.session['0']
+    'bar'
+
+同样， 无法以JSON编码的数据， 例如非UTF8字节(non-UTF8 bytes) ， 如 '\ xd9' (引发UnicodeDecodeError)， 也无法存储。
+
+有关JSON序列化限制的更多详细信息， 请参阅编写您自己的序列化程序 [Write your own serializer](https://docs.djangoproject.com/en/2.1/topics/http/sessions/#custom-serializers) 部分。 
+
+**class serializers.PickleSerializer**
+
+支持任意Python对象， 但如上所述， 如果攻击者知道 SECRET_KEY， 则可能导致远程代码执行漏洞。
+
+-------------
+
+##### 编写自己的序列化程序
+
+请注意， 与 PickleSerializer 不同， JSONSerializer 无法处理任意Python数据类型。 通常情况下， 需要在便利性和安全性之间进行权衡。 如果您希望在JSON支持的会话中存储更多高级数据类型(包括 datetime 和Decimal )， 则需要编写自定义序列化程序(或者将这些值转换为JSON可序列化对象， 然后将它们存储在 request.session 中)。 虽然序列化这些值非常简单( DjangoJSONEncoder 可能会有所帮助)， 但编写一个能够可靠地恢复您放入的相同内容的解码器更加脆弱。 例如， 您冒着返回日期时间的风险，该 datetime 实际上是恰好是为 datetimes 选择的相同格式的字符串。
+
+您的序列化程序类必须实现两个方法， dumps(self, obj) 和 loads(self, data)， 分别序列化和反序列化会话数据字典。
+
+-------------
+
+### 会话对象指南
+
+- 在 request.session 上使用普通的Python字符串作为字典键。 这更像是一种惯例而非硬性规则。
+
+- 以下划线开头的会话字典键被保留， 并供Django内部使用。
+
+- 不要使用新对象覆盖request.session， 也不要访问或设置其属性。 像Python字典一样使用它。
+
+-------------
+
+#### 例子
+
+下面这个简单的视图在用户发布评论后将 has_commented 变量设置为True。 它不允许用户多次发表评论：
+
+    def post_comment(request, new_comment):
+        if request.session.get('has_commented', False):
+            return HttpResponse("You've already commented.")
+        c = comments.Comment(comment=new_comment)
+        c.save()
+        request.session['has_commented'] = True
+        return HttpResponse('Thanks for your comment!')
 
 
+下面这个简单的视图记录了网站的“成员”：
 
+    def login(request):
+        m = Member.objects.get(username=request.POST['username'])
+        if m.password == request.POST['password']:
+            request.session['member_id'] = m.id
+            return HttpResponse("You're logged in.")
+        else:
+            return HttpResponse("Your username and password didn't match.")
 
+...根据上面的login()， 下面这个视图记录了网站成员登出：
 
+    def logout(request):
+        try:
+            del request.session['member_id']
+        except KeyError:
+            pass
+        return HttpResponse("You're logged out.")
 
+标准的 django.contrib.auth.logout() 函数实际上比这更多， 以防止无意中的数据泄漏。 它调用 request.session 的 flush() 方法。 我们使用此示例演示如何使用会话对象， 而不是完整的 logout() 实现。
 
+-------------
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#### 设置测试 cookies
 
 
 
