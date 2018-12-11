@@ -1,0 +1,27 @@
+study start from: 2018-12-10
+
+current page: 131
+
+python3 -m doctest example_script.py
+
+collections.namedtuple   创建一个具名元组需要两个参数，一个是类名，另一个是类的各个字段的名字。后者可以是由数个字符串组成的可迭代对象，或者是由空格分隔开的字段名组成的字符串。
+
+[start:stop:step]
+slice(52, 55)
+...
+
+seq.sort(key=?)
+sorted(seq, key=?)
+
+bisect.bisect
+bisect.insort
+
+array.array
+memoryview
+collections.deque
+queue: Queue, LifoQueue, PriorityQueue
+multiprocessing: Queue, JoinableQueue
+asyncio: Queue, LifoQueue, PriorityQueue, JoinableQueue
+heapq: heappush, heappop
+
+
