@@ -1,6 +1,6 @@
 study start from: 2018-12-10
 
-current page: 131
+current page: 212
 
 python3 -m doctest example_script.py
 
@@ -23,5 +23,24 @@ queue: Queue, LifoQueue, PriorityQueue
 multiprocessing: Queue, JoinableQueue
 asyncio: Queue, LifoQueue, PriorityQueue, JoinableQueue
 heapq: heappush, heappop
+
+dictcomp:
+{code: country.upper() for country, code in country_code.items() if code < 66}
+
+dict.setdefault
+collections.defaultdict(default_factory)
+collections.OrderedDict
+collections.ChainMap
+collections.Counter
+colllections.UserDict
+types.MappingProxyType
+
+
+set
+frozenset
+
+setcomps:
+{chr(i) for i in range(32, 256) if 'SIGN' in name(chr(i),'')}
+
 
 
